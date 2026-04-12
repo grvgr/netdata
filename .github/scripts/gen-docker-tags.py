@@ -10,14 +10,14 @@ from typing import Final
 github_event: Final = sys.argv[1]
 version: Final = sys.argv[2]
 
-REPO: Final = 'netdata/netdata'
+REPO: Final = 'grvgr/netdata'
 REPOS: Final = {
     'docker': REPO,
     'quay': f'quay.io/{REPO}',
     'ghcr': f'ghcr.io/{REPO}',
 }
 
-REPO: Final = 'netdata/netdata'
+REPO: Final = 'grvgr/netdata'
 QUAY_REPO: Final = f'quay.io/{REPO}'
 GHCR_REPO: Final = f'ghcr.io/{REPO}'
 NIGHTLY_TAG: Final = 'edge'

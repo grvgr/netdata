@@ -219,7 +219,7 @@ jobs:
           submodules: recursive
       - name: Generate Artifact Name
         id: artifact-name
-        if: github.repository == 'netdata/netdata' && needs.file-check.outputs.run == 'true' && github.event_name == 'workflow_dispatch'
+        if: github.repository == 'grvgr/netdata' && needs.file-check.outputs.run == 'true' && github.event_name == 'workflow_dispatch'
         run: echo "platform=$(echo ${{ matrix.platform }} | tr '/' '-' | cut -f 2- -d '-')" >> "${GITHUB_OUTPUT}"
       - name: Mark image as official
         id: env
@@ -242,7 +242,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           platforms: ${{ matrix.platform }}
-          tags: netdata/netdata:test
+          tags: grvgr/netdata:test
           load: true
           cache-to: type=local,dest=/tmp/build-cache,mode=max
           build-args: |
@@ -251,45 +251,14 @@ jobs:
             BUILD_ARCH=${{ matrix.arch }}
             BUILD_VERSION=test
             BUILD_DATE=${{ github.event.repository.updated_at }}
-      - name: Test Image
-        id: test
-        if: needs.file-check.outputs.run == 'true' && matrix.platform == 'linux/amd64'
-        run: .github/scripts/docker-test.sh
       - name: Upload Cache
         id: upload-cache
-        if: github.repository == 'netdata/netdata' && needs.file-check.outputs.run == 'true' && github.event_name == 'workflow_dispatch'
+        if: github.repository == 'grvgr/netdata' && needs.file-check.outputs.run == 'true' && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7.0.0
         with:
           name: cache-${{ steps.artifact-name.outputs.platform }}
           path: /tmp/build-cache/*
           retention-days: 1
-      - name: Failure Notification
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_COLOR: 'danger'
-          SLACK_FOOTER: ''
-          SLACK_ICON_EMOJI: ':github-actions:'
-          SLACK_TITLE: 'Docker build failed:'
-          SLACK_USERNAME: 'GitHub Actions'
-          SLACK_MESSAGE: |-
-              ${{ github.repository }}: Building or testing Docker image for ${{ matrix.platform }} failed.
-              Checkout: ${{ steps.checkout.outcome }}
-              Determine artifact name: ${{ steps.artifact-name.outcome }}
-              Setup environment: ${{ steps.env.outcome }}
-              Setup QEMU: ${{ steps.qemu.outcome }}
-              Setup buildx: ${{ steps.prepare.outcome }}
-              Build image: ${{ steps.build.outcome }}
-              Test image: ${{ steps.test.outcome }}
-              Upload build cache: ${{ steps.upload-cache.outcome }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: >-
-          ${{
-            failure()
-            && github.event_name != 'pull_request'
-            && github.repository == 'netdata/netdata'
-            && needs.file-check.outputs.run == 'true'
-          }}
-
   gen-tags:
     name: Generate Docker Tags
     runs-on: ubuntu-latest
@@ -316,324 +285,6 @@ jobs:
           else
             .github/scripts/gen-docker-tags.py ${{ github.event_name }} ''
           fi
-
-  build-images-docker-hub:
-    name: Push Images to Docker Hub
-    if: github.event_name == 'workflow_dispatch'
-    needs:
-      - build-images
-      - gen-tags
-      - matrix
-    strategy:
-      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout
-        id: checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-      - name: Generate Artifact Name
-        id: artifact-name
-        run: echo "platform=$(echo ${{ matrix.platform }} | tr '/' '-' | cut -f 2- -d '-')" >> "${GITHUB_OUTPUT}"
-      - name: Download Cache
-        id: fetch-cache
-        uses: actions/download-artifact@v8
-        with:
-          name: cache-${{ steps.artifact-name.outputs.platform }}
-          path: /tmp/build-cache
-      - name: Mark image as official
-        id: env
-        if: github.repository == 'netdata/netdata'
-        run: echo "OFFICIAL_IMAGE=true" >> "${GITHUB_ENV}"
-      - name: Setup QEMU
-        id: qemu
-        if: matrix.qemu
-        uses: docker/setup-qemu-action@v4
-      - name: Setup Buildx
-        id: prepare
-        uses: docker/setup-buildx-action@v4
-      - name: Registry Login
-        id: login
-        if: github.repository == 'netdata/netdata'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
-      - name: Build Image
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          platforms: ${{ matrix.platform }}
-          cache-from: type=local,src=/tmp/build-cache
-          outputs: type=image,name=netdata/netdata,push-by-digest=true,name-canonical=true,push=true
-          build-args: |
-            OFFICIAL_IMAGE=${{ env.OFFICIAL_IMAGE }}
-            BUILD_ARCH=${{ matrix.arch }}
-            BUILD_VERSION=${{ github.event.inputs.version }}
-            BUILD_DATE=${{ github.event.repository.updated_at }}
-      - name: Export Digest
-        id: export-digest
-        if: github.repository == 'netdata/netdata'
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-      - name: Upload digest
-        id: upload-digest
-        if: github.repository == 'netdata/netdata'
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: docker-digests-${{ steps.artifact-name.outputs.platform }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-      - name: Failure Notification
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_COLOR: 'danger'
-          SLACK_FOOTER: ''
-          SLACK_ICON_EMOJI: ':github-actions:'
-          SLACK_TITLE: 'Docker Hub upload failed:'
-          SLACK_USERNAME: 'GitHub Actions'
-          SLACK_MESSAGE: |-
-              ${{ github.repository }}: Creating or uploading Docker image for ${{ matrix.platform }} on Docker Hub failed.
-              Checkout: ${{ steps.checkout.outcome }}
-              Determine artifact name: ${{ steps.artifact-name.outcome }}
-              Fetch build cache: ${{ steps.fetch-cache.outcome }}
-              Setup environment: ${{ steps.env.outcome }}
-              Setup QEMU: ${{ steps.qemu.outcome }}
-              Setup buildx: ${{ steps.prepare.outcome }}
-              Login to registry: ${{ steps.login.outcome }}
-              Build image: ${{ steps.build.outcome }}
-              Export digest: ${{ steps.export-digest.outcome }}
-              Upload digest: ${{ steps.upload-digest.outcome }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: >-
-          ${{
-            failure()
-            && github.repository == 'netdata/netdata'
-          }}
-
-  publish-docker-hub:
-    name: Consolidate and tag images for DockerHub
-    if: github.event_name == 'workflow_dispatch'
-    needs:
-      - build-images-docker-hub
-      - gen-tags
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        id: checkout
-        uses: actions/checkout@v6
-      - name: Download digests
-        id: fetch-digests
-        uses: actions/download-artifact@v8
-        with:
-          path: /tmp/digests
-          pattern: docker-digests-*
-          merge-multiple: true
-      - name: Setup Buildx
-        id: prepare
-        uses: docker/setup-buildx-action@v4
-      - name: Registry Login
-        id: login
-        if: github.repository == 'netdata/netdata'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
-      - name: Create and Push Manifest
-        id: manifest
-        if: github.repository == 'netdata/netdata'
-        run: docker buildx imagetools create $(.github/scripts/gen-docker-imagetool-args.py /tmp/digests '' "${{ needs.gen-tags.outputs.tags }}")
-      - name: Rotate Old Image Tags
-        id: rotate
-        if: github.repository == 'netdata/netdata' && needs.gen-tags.outputs.nightly == '1'
-        run: .github/scripts/rotate-docker-tags.sh ${{ needs.gen-tags.outputs.docker_repo }} ${{ needs.gen-tags.outputs.nightly_tag }} ${NIGHTLY_COUNT}
-      - name: Failure Notification
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_COLOR: 'danger'
-          SLACK_FOOTER: ''
-          SLACK_ICON_EMOJI: ':github-actions:'
-          SLACK_TITLE: 'Publishing Docker images to Docker Hub failed:'
-          SLACK_USERNAME: 'GitHub Actions'
-          SLACK_MESSAGE: |-
-              ${{ github.repository }}: Publishing Docker images to Docker Hub failed.
-              Checkout: ${{ steps.checkout.outcome }}
-              Download digests: ${{ steps.fetch-digests.outcome }}
-              Setup buildx: ${{ steps.prepare.outcome }}
-              Login to registry: ${{ steps.login.outcome }}
-              Create and push manifest: ${{ steps.manifest.outcome }}
-              Rotate old image tags: ${{ steps.rotate.outcome }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: >-
-          ${{
-            failure()
-            && github.repository == 'netdata/netdata'
-          }}
-
-  build-images-quay:
-    name: Push Images to Quay.io
-    if: github.event_name == 'workflow_dispatch'
-    needs:
-      - build-images
-      - gen-tags
-      - matrix
-    strategy:
-      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout
-        id: checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          submodules: recursive
-      - name: Generate Artifact Name
-        id: artifact-name
-        run: echo "platform=$(echo ${{ matrix.platform }} | tr '/' '-' | cut -f 2- -d '-')" >> "${GITHUB_OUTPUT}"
-      - name: Download Cache
-        id: fetch-cache
-        uses: actions/download-artifact@v8
-        with:
-          name: cache-${{ steps.artifact-name.outputs.platform }}
-          path: /tmp/build-cache
-      - name: Mark image as official
-        id: env
-        if: github.repository == 'netdata/netdata'
-        run: echo "OFFICIAL_IMAGE=true" >> "${GITHUB_ENV}"
-      - name: Setup QEMU
-        id: qemu
-        if: matrix.qemu
-        uses: docker/setup-qemu-action@v4
-      - name: Setup Buildx
-        id: prepare
-        uses: docker/setup-buildx-action@v4
-      - name: Registry Login
-        id: login
-        if: github.repository == 'netdata/netdata'
-        uses: docker/login-action@v4
-        with:
-          registry: quay.io
-          username: ${{ secrets.NETDATABOT_QUAY_USERNAME }}
-          password: ${{ secrets.NETDATABOT_QUAY_TOKEN }}
-      - name: Build Image
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          platforms: ${{ matrix.platform }}
-          cache-from: type=local,src=/tmp/build-cache
-          build-args: |
-            OFFICIAL_IMAGE=${{ env.OFFICIAL_IMAGE }}
-            BUILD_ARCH=${{ matrix.arch }}
-            BUILD_VERSION=${{ github.event.inputs.version }}
-            BUILD_DATE=${{ github.event.repository.updated_at }}
-          outputs: type=image,name=quay.io/netdata/netdata,push-by-digest=true,name-canonical=true,push=true
-      - name: Export Digest
-        id: export-digest
-        if: github.repository == 'netdata/netdata'
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-      - name: Upload digest
-        id: upload-digest
-        if: github.repository == 'netdata/netdata'
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: quay-digests-${{ steps.artifact-name.outputs.platform }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-      - name: Failure Notification
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_COLOR: 'danger'
-          SLACK_FOOTER: ''
-          SLACK_ICON_EMOJI: ':github-actions:'
-          SLACK_TITLE: 'Quay.io upload failed:'
-          SLACK_USERNAME: 'GitHub Actions'
-          SLACK_MESSAGE: |-
-              ${{ github.repository }}: Creating or uploading Docker image for ${{ matrix.platform }} on Quay.io failed.
-              Checkout: ${{ steps.checkout.outcome }}
-              Determine artifact name: ${{ steps.artifact-name.outcome }}
-              Fetch build cache: ${{ steps.fetch-cache.outcome }}
-              Setup environment: ${{ steps.env.outcome }}
-              Setup QEMU: ${{ steps.qemu.outcome }}
-              Setup buildx: ${{ steps.prepare.outcome }}
-              Login to registry: ${{ steps.login.outcome }}
-              Build image: ${{ steps.build.outcome }}
-              Export digest: ${{ steps.export-digest.outcome }}
-              Upload digest: ${{ steps.upload-digest.outcome }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: >-
-          ${{
-            failure()
-            && github.repository == 'netdata/netdata'
-          }}
-
-  publish-quay:
-    name: Consolidate and tag images for Quay.io
-    if: github.event_name == 'workflow_dispatch'
-    needs:
-      - build-images-quay
-      - gen-tags
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        id: checkout
-        uses: actions/checkout@v6
-      - name: Download digests
-        id: fetch-digests
-        uses: actions/download-artifact@v8
-        with:
-          path: /tmp/digests
-          pattern: quay-digests-*
-          merge-multiple: true
-      - name: Setup Buildx
-        id: prepare
-        uses: docker/setup-buildx-action@v4
-      - name: Registry Login
-        id: login
-        if: github.repository == 'netdata/netdata'
-        uses: docker/login-action@v4
-        with:
-          registry: quay.io
-          username: ${{ secrets.NETDATABOT_QUAY_USERNAME }}
-          password: ${{ secrets.NETDATABOT_QUAY_TOKEN }}
-      - name: Create and Push Manifest
-        id: manifest
-        if: github.repository == 'netdata/netdata'
-        run: docker buildx imagetools create $(.github/scripts/gen-docker-imagetool-args.py /tmp/digests 'quay.io' "${{ needs.gen-tags.outputs.tags }}")
-      - name: Rotate Old Image Tags
-        id: rotate
-        if: github.repository == 'netdata/netdata' && needs.gen-tags.outputs.nightly == '1'
-        run: .github/scripts/rotate-docker-tags.sh ${{ needs.gen-tags.outputs.quay_repo }} ${{ needs.gen-tags.outputs.nightly_tag }} ${NIGHTLY_COUNT}
-      - name: Failure Notification
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_COLOR: 'danger'
-          SLACK_FOOTER: ''
-          SLACK_ICON_EMOJI: ':github-actions:'
-          SLACK_TITLE: 'Publishing Docker images on Quay.io failed:'
-          SLACK_USERNAME: 'GitHub Actions'
-          SLACK_MESSAGE: |-
-              ${{ github.repository }}: Publishing Docker images on Quay.io failed.
-              Checkout: ${{ steps.checkout.outcome }}
-              Download digests: ${{ steps.fetch-digests.outcome }}
-              Setup buildx: ${{ steps.prepare.outcome }}
-              Login to registry: ${{ steps.login.outcome }}
-              Create and push manifest: ${{ steps.manifest.outcome }}
-              Rotate old image tags: ${{ steps.rotate.outcome }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: >-
-          ${{
-            failure()
-            && github.repository == 'netdata/netdata'
-          }}
 
   build-images-ghcr:
     name: Push Images to GHCR
@@ -674,7 +325,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
       - name: Registry Login
         id: login
-        if: github.repository == 'netdata/netdata'
+        if: github.repository == 'grvgr/netdata'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -691,17 +342,17 @@ jobs:
             BUILD_ARCH=${{ matrix.arch }}
             BUILD_VERSION=${{ github.event.inputs.version }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
-          outputs: type=image,name=ghcr.io/netdata/netdata,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/grvgr/netdata,push-by-digest=true,name-canonical=true,push=true
       - name: Export Digest
         id: export-digest
-        if: github.repository == 'netdata/netdata'
+        if: github.repository == 'grvgr/netdata'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
       - name: Upload digest
         id: upload-digest
-        if: github.repository == 'netdata/netdata'
+        if: github.repository == 'grvgr/netdata'
         uses: actions/upload-artifact@v7.0.0
         with:
           name: ghcr-digests-${{ steps.artifact-name.outputs.platform }}
@@ -758,7 +409,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
       - name: Registry Login
         id: login
-        if: github.repository == 'netdata/netdata'
+        if: github.repository == 'grvgr/netdata'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -766,11 +417,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Create and Push Manifest
         id: manifest
-        if: github.repository == 'netdata/netdata'
+        if: github.repository == 'grvgr/netdata'
         run: docker buildx imagetools create $(.github/scripts/gen-docker-imagetool-args.py /tmp/digests 'ghcr.io' "${{ needs.gen-tags.outputs.tags }}")
       - name: Rotate Old Image Tags
         id: rotate
-        if: github.repository == 'netdata/netdata' && needs.gen-tags.outputs.nightly == '1'
+        if: github.repository == 'grvgr/netdata' && needs.gen-tags.outputs.nightly == '1'
         run: .github/scripts/rotate-docker-tags.sh ${{ needs.gen-tags.outputs.ghcr_repo }} ${{ needs.gen-tags.outputs.nightly_tag }} ${NIGHTLY_COUNT}
       - name: Failure Notification
         uses: rtCamp/action-slack-notify@v2
@@ -795,57 +446,3 @@ jobs:
             && github.repository == 'netdata/netdata'
           }}
 
-  trigger-subsequent-workflows:
-    if: github.event_name == 'workflow_dispatch'
-    name: Trigger subsquent workflows for newly added versions
-    needs:
-      - publish-docker-hub
-      - gen-tags
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        id: checkout
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      - name: Trigger Helmchart PR
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != 'nightly' && github.repository == 'netdata/netdata'
-        id: trigger-helmchart
-        uses: benc-uk/workflow-dispatch@v1
-        with:
-          token: ${{ secrets.NETDATABOT_GITHUB_TOKEN }}
-          repo: netdata/helmchart
-          workflow: Agent Version PR
-          ref: refs/heads/master
-          inputs: '{"agent_version": "v${{ inputs.version }}"}'
-      - name: Trigger MSI build
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != 'nightly' && github.repository == 'netdata/netdata'
-        id: trigger-msi
-        uses: benc-uk/workflow-dispatch@v1
-        with:
-          token: ${{ secrets.NETDATABOT_GITHUB_TOKEN }}
-          repo: netdata/msi-installer
-          workflow: Build
-          ref: refs/heads/master
-          inputs: '{"tag": "stable", "pwd": "${{ secrets.MSI_CODE_SIGNING_PASSWORD }}"}'
-      - name: Failure Notification
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_COLOR: 'danger'
-          SLACK_FOOTER: ''
-          SLACK_ICON_EMOJI: ':github-actions:'
-          SLACK_TITLE: ':'
-          SLACK_USERNAME: 'GitHub Actions'
-          SLACK_MESSAGE: |-
-              ${{ github.repository }}: Version cascade failed
-              Checkout: ${{ steps.checkout.outcome }}
-              Trigger Helmchart PR: ${{ steps.trigger-helmchart.outcome }}
-              Trigger MSI build: ${{ steps.trigger-msi.outcome }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: >-
-          ${{
-            failure()
-            && github.event_name != 'pull_request'
-            && startsWith(github.ref, 'refs/heads/master')
-            && github.repository == 'netdata/netdata'
-          }}
